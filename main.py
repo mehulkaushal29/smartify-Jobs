@@ -1,7 +1,7 @@
 import logging
 import re
-import pytz
 from datetime import time as dtime
+from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -28,14 +28,7 @@ logger = logging.getLogger("smartify")
 # ----------------- Helpers -----------------
 
 def parse_jobs_args(args):
-    """
-    Parse /jobs arguments.
-      /jobs data engineer
-      /jobs au data engineer
-      /jobs in python developer loc=Bengaluru
-      /jobs cloud architect loc=Melbourne
-    """
-    country = "AU"  # default
+    country = "AU"
     location = None
     tokens = []
 
@@ -53,23 +46,13 @@ def parse_jobs_args(args):
 
 
 def parse_free_text_to_query(text: str):
-    """
-    Accepts any free text:
-      'developer'
-      'python developer in au'
-      'data engineer in india loc=Bengaluru'
-      'it support au loc=Melbourne'
-    Returns (keyword, country, location)
-    """
     t = (text or "").strip()
-    # normalise spaces & soften stray punctuation
     t = re.sub(r"[,\.;:]+", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
 
     country = "AU"
     location = None
 
-    # detect country hints
     if re.search(r"\b(au|australia)\b", t, flags=re.I):
         country = "AU"
         t = re.sub(r"\b(au|australia)\b", "", t, flags=re.I)
@@ -77,7 +60,6 @@ def parse_free_text_to_query(text: str):
         country = "IN"
         t = re.sub(r"\bindia\b", "", t, flags=re.I)
 
-    # loc=City
     m = re.search(r"loc=([A-Za-z\s]+)", t)
     if m:
         location = m.group(1).strip()
@@ -117,7 +99,6 @@ def start_keyboard() -> InlineKeyboardMarkup:
 # ----------------- Channel posting -----------------
 
 async def post_channel_summary(app):
-    """Compose a daily summary and post it to your channel (if configured)."""
     if not CHANNEL_ID:
         logger.warning("CHANNEL_ID not set — skipping channel post.")
         return
@@ -142,7 +123,6 @@ async def post_channel_summary(app):
 
     text = "\n\n—\n\n".join(parts)
 
-    # CTA buttons under every channel post
     buttons = [
         [InlineKeyboardButton("🤖 Open Bot / Subscribe", url="https://t.me/smartify_jobs_bot")],
         [InlineKeyboardButton("📢 Join Smartify Jobs", url=f"https://t.me/{CHANNEL_ID.lstrip('@')}")],
@@ -157,9 +137,9 @@ async def post_channel_summary(app):
             disable_web_page_preview=True,
             reply_markup=markup,
         )
-        logger.info(f"✅ Posted daily summary to channel {CHANNEL_ID}")
+        logger.info(f"Posted daily summary to channel {CHANNEL_ID}")
     except Exception as e:
-        logger.warning(f"❌ Failed to post to channel {CHANNEL_ID}: {e}")
+        logger.warning(f"Failed to post to channel {CHANNEL_ID}: {e}")
 
 
 # ----------------- Command Handlers -----------------
@@ -181,7 +161,7 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     header = f"🔎 <b>Jobs for “{kw}” — {cc}</b>" + (f" — {loc}" if loc else "")
     if not results:
         return await update.message.reply_text(
-            header + "\n\nNo results found right now. Try a broader keyword or add loc=City.",
+            header + "\n\nNo results found.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
@@ -195,9 +175,9 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def jobs_au(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     upsert_user(user_id, prefs={"jobs_au": True})
-    jobs_list = get_jobs("software engineer", "AU", location=None)
+    jobs_list = get_jobs("software engineer", "AU")
     await update.message.reply_text(
-        "🔥 <b>Today’s AU jobs</b>:\n\n" + format_jobs(jobs_list),
+        "🔥 <b>Today's AU jobs</b>:\n\n" + format_jobs(jobs_list),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
@@ -206,9 +186,9 @@ async def jobs_au(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def jobs_in(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     upsert_user(user_id, prefs={"jobs_in": True})
-    jobs_list = get_jobs("software engineer", "IN", location=None)
+    jobs_list = get_jobs("software engineer", "IN")
     await update.message.reply_text(
-        "🔥 <b>Today’s India jobs</b>:\n\n" + format_jobs(jobs_list),
+        "🔥 <b>Today's India jobs</b>:\n\n" + format_jobs(jobs_list),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
@@ -239,7 +219,6 @@ async def both(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Quick subscribe with args; otherwise open interactive button menu."""
     user_id = update.effective_user.id
     args = [a.lower() for a in context.args]
 
@@ -251,7 +230,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upsert_user(user_id, prefs=prefs)
         pretty = ", ".join([k for k, v in prefs.items() if v]) or "(none)"
         return await update.message.reply_text(
-            f"✅ Subscribed to: {pretty}. You’ll get daily updates at {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}.",
+            f"Subscribed to: {pretty}.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
@@ -260,9 +239,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs = user.get("prefs", {"jobs_au": False, "jobs_in": False, "ai_tools": False})
     daily_time = f"{DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}"
     await update.message.reply_text(
-        "Choose what you want to receive daily:\n"
-        "• Tap to toggle items below\n"
-        "• Press ‘Done’ to save",
+        "Choose what you want daily:",
         reply_markup=build_subscribe_keyboard(prefs, daily_time),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
@@ -270,7 +247,6 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button presses in the /subscribe menu and /start menu."""
     query = update.callback_query
     await query.answer()
 
@@ -279,9 +255,7 @@ async def sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prefs = user.get("prefs", {"jobs_au": False, "jobs_in": False, "ai_tools": False})
         daily_time = f"{DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}"
         return await query.edit_message_text(
-            "Choose what you want to receive daily:\n"
-            "• Tap to toggle items below\n"
-            "• Press ‘Done’ to save",
+            "Choose what you want to receive daily:",
             reply_markup=build_subscribe_keyboard(prefs, daily_time),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
@@ -300,7 +274,7 @@ async def sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prefs = {"jobs_au": False, "jobs_in": False, "ai_tools": False}
         upsert_user(user_id, prefs=prefs)
         return await query.edit_message_text(
-            "🛑 Unsubscribed from all daily pushes. You can still use /jobs_au, /jobs_in, /aitools on demand.",
+            "Unsubscribed from all.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
@@ -309,13 +283,13 @@ async def sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upsert_user(user_id, prefs=prefs)
         pretty = ", ".join([k for k, v in prefs.items() if v]) or "(none)"
         return await query.edit_message_text(
-            f"✅ Saved. Subscribed to: {pretty}.\nDaily time: {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}",
+            f"Saved: {pretty}.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
 
     if data.startswith("sub:toggle:"):
-        key = data.split(":", 2)[-1]  # jobs_au | jobs_in | ai_tools
+        key = data.split(":", 2)[-1]
         prefs[key] = not prefs.get(key, False)
         daily_time = f"{DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}"
         return await query.edit_message_reply_markup(
@@ -327,7 +301,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     upsert_user(user_id, prefs={"jobs_au": False, "jobs_in": False, "ai_tools": False})
     await update.message.reply_text(
-        "🛑 Unsubscribed from all daily pushes. You can still use /jobs_au, /jobs_in, /aitools on demand.",
+        "Unsubscribed from all daily pushes.",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
@@ -341,59 +315,46 @@ async def prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• jobs_au: {p['jobs_au']}\n"
         f"• jobs_in: {p['jobs_in']}\n"
         f"• ai_tools: {p['ai_tools']}\n"
-        f"Daily time: {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}"
+        f"Daily: {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}"
     )
-    await update.message.reply_text(
-        msg,
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True
-    )
+    await update.message.reply_text(msg)
 
 
 async def settz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Usage: /settz Asia/Kolkata  or  /settz Australia/Melbourne"""
     if not context.args:
         return await update.message.reply_text(
-            "Send a valid IANA timezone, e.g. /settz Asia/Kolkata",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
+            "Send a valid timezone, e.g. /settz Asia/Kolkata"
         )
+
     tz_str = context.args[0]
+
+    # validate using ZoneInfo
     try:
-        pytz.timezone(tz_str)  # validate
+        ZoneInfo(tz_str)
     except Exception:
         return await update.message.reply_text(
-            "Invalid timezone. Try a valid tz like Asia/Kolkata or Australia/Melbourne.",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
+            "Invalid timezone. Try Asia/Kolkata or Australia/Melbourne."
         )
+
     upsert_user(update.effective_user.id, tz=tz_str)
     await update.message.reply_text(
-        f"✅ Timezone set to {tz_str}. (Daily run time is global: {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ})",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True
+        f"Timezone set to {tz_str}."
     )
 
 
 async def pushnow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manual trigger for daily push (useful for testing)."""
     await push_daily_job(context)
-    await update.message.reply_text(
-        "✅ Pushed now.",
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True
-    )
+    await update.message.reply_text("Pushed now.")
 
 
 async def postchannel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manual test: post the combined summary to the channel."""
     if not CHANNEL_ID:
         return await update.message.reply_text("CHANNEL_ID not set in .env.")
     await post_channel_summary(context.application)
-    await update.message.reply_text("✅ Posted to channel.")
+    await update.message.reply_text("Posted to channel.")
 
 
-# ----------------- Plain Text Search (no slash) -----------------
+# ----------------- Text Search -----------------
 
 async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
@@ -405,7 +366,7 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if results:
             cc = try_cc
     header = f"🔎 <b>Jobs for “{kw}” — {cc}</b>" + (f" — {loc}" if loc else "")
-    msg = header + "\n\n" + (format_jobs(results) if results else "No results found. Try a broader keyword or add loc=City.")
+    msg = header + "\n\n" + (format_jobs(results) if results else "No results found.")
     await update.message.reply_text(
         msg,
         parse_mode=ParseMode.HTML,
@@ -413,13 +374,12 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ----------------- Daily Push Job (via JobQueue) -----------------
+# ----------------- Daily Push -----------------
 
 async def push_daily_job(context: ContextTypes.DEFAULT_TYPE):
     app = context.application
     logger.info("Running daily push job…")
 
-    # 1) Push to subscribed users
     for row in all_users():
         uid = row["user_id"]
         p = row.get("prefs", {})
@@ -445,13 +405,11 @@ async def push_daily_job(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.warning(f"Failed to push to {uid}: {e}")
 
-    # 2) Also post a public summary to your channel
     await post_channel_summary(app)
 
 
 async def on_startup(application):
-    # Schedule a daily job at DAILY_HOUR:DAILY_MINUTE in DEFAULT_TZ
-    tz = pytz.timezone(DEFAULT_TZ)
+    tz = ZoneInfo(DEFAULT_TZ)  # UPDATED — no pytz
     application.job_queue.run_daily(
         push_daily_job,
         time=dtime(hour=DAILY_HOUR, minute=DAILY_MINUTE, tzinfo=tz),
@@ -478,15 +436,15 @@ def run():
     app.add_handler(CommandHandler("prefs", prefs))
     app.add_handler(CommandHandler("settz", settz))
     app.add_handler(CommandHandler("pushnow", pushnow))
-    app.add_handler(CommandHandler("postchannel", postchannel))  # test posting to channel
+    app.add_handler(CommandHandler("postchannel", postchannel))
 
-    # Buttons from /start and /subscribe
+    # Buttons
     app.add_handler(CallbackQueryHandler(sub_callback, pattern=r"^(ui:open_subscribe|sub:.*)$"))
 
-    # Plain text (must be after command handlers)
+    # Plain text search
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_search))
 
-    # Hook startup to schedule the daily job
+    # Daily job
     app.post_init = on_startup
 
     app.run_polling(allowed_updates=Update.ALL_TYPES)
