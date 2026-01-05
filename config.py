@@ -12,4 +12,4 @@ DAILY_MINUTE = int(os.getenv("DAILY_MINUTE", 0))
 RESULTS_PER_PAGE = 3
 
 # ✅ NEW
-CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()  # should show this

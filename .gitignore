@@ -1,7 +1,19 @@
-echo ".venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Virtual env
+.venv/
+venv/
+
+# Env files
 .env
+.env.*
+!.env.example
+
+# macOS
 .DS_Store
+
+# Local DB / cache
 users_db.json
-" > .gitignore

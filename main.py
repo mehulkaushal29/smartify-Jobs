@@ -447,8 +447,9 @@ def run():
     # Daily job
     app.post_init = on_startup
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     run()
+
